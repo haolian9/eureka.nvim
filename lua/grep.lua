@@ -5,9 +5,13 @@ local fn = require("infra.fn")
 local vsel = require("infra.vsel")
 local subprocess = require("infra.subprocess")
 local fs = require("infra.fs")
-local jelly = require("infra.jellyfish")("grep")
+local jelly = require("infra.jellyfish")("grep", vim.log.levels.DEBUG)
+local listlib = require("infra.listlib")
+local quickfix = require("sting.quickfix")
 
 local qltoggle = require("qltoggle")
+
+local sting_ns = "grep"
 
 local callbacks = {
   output = function(pattern, root)
@@ -19,13 +23,9 @@ local callbacks = {
     local resolve_fpath = (function()
       local cwd = vim.fn.getcwd()
 
-      if cwd == root then return function(relpath)
-        return relpath
-      end end
+      if cwd == root then return function(relpath) return relpath end end
 
-      return function(relpath)
-        return fs.joinpath(root, relpath)
-      end
+      return function(relpath) return fs.joinpath(root, relpath) end
     end)()
 
     -- :h setqflist-what
@@ -44,21 +44,11 @@ local callbacks = {
 
     ---@param output_iter fun(): string?
     return function(output_iter)
-      local batch_size = 128
-      local output_to_qflist = function(output_lines)
-        -- git grep's output happens to be same as rg
-        return fn.concrete(fn.map(rg_to_qf, output_lines))
+      quickfix.items:set(sting_ns, {})
+      for line in output_iter do
+        quickfix.items:append(sting_ns, rg_to_qf(line))
       end
-
-      -- qflist is globally unique, while loclist is bound to buffer
-      vim.fn.setqflist({}, "r", { title = "grep://" .. pattern, items = {} })
-
-      for lines in fn.batch(output_iter, batch_size) do
-        local copy = lines
-        vim.schedule(function()
-          vim.fn.setqflist({}, "a", { items = output_to_qflist(copy) })
-        end)
-      end
+      quickfix:feed_vim(sting_ns)
       -- showing quickfix window lastly, maybe this can reduce the copying
       -- between quickfix buffer and internal datastructure while updating
       -- quickfix items
@@ -72,14 +62,12 @@ local callbacks = {
       -- 1: no error, has none match
       if exit_code == 0 then return end
       if exit_code == 1 then return end
-      vim.schedule(function()
-        jelly.err("grep failed: %s args=%s, cwd=%s", cmd, table.concat(args), path)
-      end)
+      vim.schedule(function() jelly.err("grep failed: %s args=%s, cwd=%s", cmd, table.concat(args), path) end)
     end
   end,
 }
 
-local rg = function(path, pattern, extra_args)
+local function rg(path, pattern, extra_args)
   assert(pattern ~= nil)
   if path == nil then return jelly.warn("path is nil, rg canceled") end
 
@@ -93,12 +81,12 @@ local rg = function(path, pattern, extra_args)
     "--smart-case",
   }
   do
-    if extra_args ~= nil then fn.list_extend(args, extra_args) end
+    if extra_args ~= nil then listlib.extend(args, extra_args) end
     table.insert(args, "--")
     table.insert(args, pattern)
   end
 
-  subprocess.asyncrun("rg", { args = args, cwd = path }, callbacks.output(pattern, path), callbacks.exit("rg", args, path))
+  subprocess.spawn("rg", { args = args, cwd = path }, callbacks.output(pattern, path), callbacks.exit("rg", args, path))
 end
 
 local function gitgrep(path, pattern, extra_args)
@@ -107,12 +95,12 @@ local function gitgrep(path, pattern, extra_args)
 
   local args = { "grep", "--line-number", "--column", "--no-color" }
   do
-    if extra_args ~= nil then fn.list_extend(args, extra_args) end
+    if extra_args ~= nil then listlib.extend(args, extra_args) end
     table.insert(args, "--")
     table.insert(args, pattern)
   end
 
-  subprocess.asyncrun("git", { args = args, cwd = path }, callbacks.output(pattern, path), callbacks.exit("gitgrep", args, path))
+  subprocess.spawn("git", { args = args, cwd = path }, callbacks.output(pattern, path), callbacks.exit("gitgrep", args, path))
 end
 
 local function make_runner(runner)
@@ -121,9 +109,7 @@ local function make_runner(runner)
   local determiners = {
     repo = project.git_root,
     cwd = project.working_root,
-    dot = function()
-      return vim.fn.expand("%:p:h")
-    end,
+    dot = function() return vim.fn.expand("%:p:h") end,
   }
 
   return {
