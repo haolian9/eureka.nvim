@@ -49,9 +49,10 @@ local callbacks = {
         quickfix.items:append(sting_ns, rg_to_qf(line))
       end
       quickfix:feed_vim(sting_ns)
-      -- showing quickfix window lastly, maybe this can reduce the copying
-      -- between quickfix buffer and internal datastructure while updating
-      -- quickfix items
+
+      ---showing quickfix window lastly, maybe this can reduce the copying
+      ---between quickfix buffer and internal datastructure while updating
+      ---quickfix items
       qltoggle.open_qflist()
     end
   end,
