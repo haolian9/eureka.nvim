@@ -1,62 +1,76 @@
 local M = {}
 
-local project = require("infra.project")
 local fn = require("infra.fn")
-local vsel = require("infra.vsel")
-local subprocess = require("infra.subprocess")
 local fs = require("infra.fs")
 local jelly = require("infra.jellyfish")("grep", vim.log.levels.DEBUG)
 local listlib = require("infra.listlib")
-local quickfix = require("sting.quickfix")
+local project = require("infra.project")
+local subprocess = require("infra.subprocess")
+local vsel = require("infra.vsel")
 
 local qltoggle = require("qltoggle")
+local quickfix = require("sting.quickfix")
 
-local sting_ns = "grep"
+local uv = vim.loop
 
-local callbacks = {
-  output = function(pattern, root)
+local Converter
+do
+  ---:h setqflist-what
+  ---qflist and loclist shares the same structure
+  local function call(t, line)
+    -- lno, col: 1-based
+    local file, lno, col, text = unpack(fn.split(line, ":", 3))
+    assert(file and lno and col and text)
+
+    ---why:
+    ---* git grep and rg output relative path
+    ---* nvim treats non-absolute path in qflist/loclist relative to cwd
+    local fname = t.resolve_fpath(file)
+
+    return { filename = fname, col = col, lnum = lno, text = text }
+  end
+
+  ---@param root string
+  ---@return fun(line: string): sting.Item
+  function Converter(root)
+    local cwd = uv.cwd()
+
+    local resolve_fpath
+    if cwd == root then
+      resolve_fpath = function(relpath) return relpath end
+    else
+      resolve_fpath = function(relpath) return fs.joinpath(root, relpath) end
+    end
+
+    ---@diagnostic disable-next-line: return-type-mismatch
+    return setmetatable({ resolve_fpath = resolve_fpath }, { __call = call })
+  end
+end
+
+local callbacks = {}
+do
+  function callbacks.output(pattern, root)
     assert(pattern and root)
 
-    -- why:
-    -- * git grep and rg output relative path
-    -- * nvim treats non-absolute path in qflist/loclist relative to cwd
-    local resolve_fpath = (function()
-      local cwd = vim.fn.getcwd()
-
-      if cwd == root then return function(relpath) return relpath end end
-
-      return function(relpath) return fs.joinpath(root, relpath) end
-    end)()
-
-    -- :h setqflist-what
-    -- qflist and loclist shares the same structure
-    local rg_to_qf = function(line)
-      -- lno, col: 1-based
-      local file, lno, col, text = unpack(fn.split(line, ":", 3))
-      assert(file and lno and col and text)
-      return {
-        filename = resolve_fpath(file),
-        col = col,
-        lnum = lno,
-        text = text,
-      }
-    end
+    local converter = Converter(root)
+    local ns = string.format("grep:%s", pattern)
 
     ---@param output_iter fun(): string?
     return function(output_iter)
-      quickfix.items:set(sting_ns, {})
+      quickfix.items:set(ns, {})
       for line in output_iter do
-        quickfix.items:append(sting_ns, rg_to_qf(line))
+        quickfix.items:append(ns, converter(line))
       end
-      quickfix:feed_vim(sting_ns)
+      quickfix.feed_vim(ns)
 
       ---showing quickfix window lastly, maybe this can reduce the copying
       ---between quickfix buffer and internal datastructure while updating
       ---quickfix items
       qltoggle.open_qflist()
     end
-  end,
-  exit = function(cmd, args, path)
+  end
+
+  function callbacks.exit(cmd, args, path)
     return function(exit_code)
       -- rg, git grep shares same meaning on return code 0 and 1
       -- 0: no error, has at least one match
@@ -65,8 +79,8 @@ local callbacks = {
       if exit_code == 1 then return end
       vim.schedule(function() jelly.err("grep failed: %s args=%s, cwd=%s", cmd, table.concat(args), path) end)
     end
-  end,
-}
+  end
+end
 
 local function rg(path, pattern, extra_args)
   assert(pattern ~= nil)
