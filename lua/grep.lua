@@ -11,8 +11,6 @@ local vsel = require("infra.vsel")
 local qltoggle = require("qltoggle")
 local quickfix = require("sting.quickfix")
 
-local uv = vim.loop
-
 local Converter
 do
   ---:h setqflist-what
@@ -33,7 +31,7 @@ do
   ---@param root string
   ---@return fun(line: string): sting.Item
   function Converter(root)
-    local cwd = uv.cwd()
+    local cwd = project.working_root()
 
     local resolve_fpath
     if cwd == root then
