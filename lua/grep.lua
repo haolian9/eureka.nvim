@@ -9,7 +9,7 @@ local subprocess = require("infra.subprocess")
 local vsel = require("infra.vsel")
 
 local qltoggle = require("qltoggle")
-local quickfix = require("sting.quickfix")
+local sting = require("sting")
 
 local Converter
 do
@@ -29,7 +29,7 @@ do
   end
 
   ---@param root string
-  ---@return fun(line: string): sting.Item
+  ---@return fun(line: string): sting.Pickle
   function Converter(root)
     local cwd = project.working_root()
 
@@ -51,15 +51,15 @@ do
     assert(pattern and root)
 
     local converter = Converter(root)
-    local ns = string.format("grep:%s", pattern)
+    local qf = sting.quickfix.shelf(string.format("grep:%s", pattern))
 
     ---@param output_iter fun(): string?
     return function(output_iter)
-      quickfix.items:set(ns, {})
+      qf:reset()
       for line in output_iter do
-        quickfix.items:append(ns, converter(line))
+        qf:append(converter(line))
       end
-      quickfix.feed_vim(ns)
+      qf:feed_vim()
 
       ---showing quickfix window lastly, maybe this can reduce the copying
       ---between quickfix buffer and internal datastructure while updating
