@@ -2,7 +2,7 @@ local M = {}
 
 local fn = require("infra.fn")
 local fs = require("infra.fs")
-local jelly = require("infra.jellyfish")("grep", "debug")
+local jelly = require("infra.jellyfish")("grep")
 local listlib = require("infra.listlib")
 local project = require("infra.project")
 local subprocess = require("infra.subprocess")
