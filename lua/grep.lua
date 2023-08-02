@@ -1,6 +1,5 @@
 local M = {}
 
-local fn = require("infra.fn")
 local fs = require("infra.fs")
 local jelly = require("infra.jellyfish")("grep")
 local listlib = require("infra.listlib")
@@ -17,8 +16,11 @@ do
   ---qflist and loclist shares the same structure
   local function call(t, line)
     -- lno, col: 1-based
-    local file, lno, col, text = unpack(fn.split(line, ":", 3))
-    assert(file and lno and col and text)
+    local file, lno, col, text = string.match(line, "(.+):(%d+):(%d+):(.*)")
+    assert(file and text, line)
+    lno = tonumber(lno)
+    col = tonumber(col)
+    assert(lno and col)
 
     ---why:
     ---* git grep and rg output relative path
@@ -45,9 +47,9 @@ do
   end
 end
 
-local callbacks = {}
+local rg, gitgrep
 do
-  function callbacks.output(pattern, root)
+  local function output_callback(pattern, root)
     assert(pattern and root)
 
     local converter = Converter(root)
@@ -68,7 +70,7 @@ do
     end
   end
 
-  function callbacks.exit(cmd, args, path)
+  local function exit_callback(cmd, args, path)
     return function(exit_code)
       -- rg, git grep shares same meaning on return code 0 and 1
       -- 0: no error, has at least one match
@@ -78,77 +80,91 @@ do
       vim.schedule(function() jelly.err("grep failed: %s args=%s, cwd=%s", cmd, table.concat(args), path) end)
     end
   end
-end
 
-local function rg(path, pattern, extra_args)
-  assert(pattern ~= nil)
-  if path == nil then return jelly.warn("path is nil, rg canceled") end
+  ---@param path string
+  ---@param pattern string
+  ---@param extra_args? string[]
+  function rg(path, pattern, extra_args)
+    assert(pattern ~= nil)
+    if path == nil then return jelly.warn("path is nil, rg canceled") end
 
-  local args = {
-    "--column",
-    "--line-number",
-    "--no-heading",
-    "--color=never",
-    "--hidden",
-    "--max-columns=512",
-    "--smart-case",
-  }
-  do
-    if extra_args ~= nil then listlib.extend(args, extra_args) end
-    table.insert(args, "--")
-    table.insert(args, pattern)
+    local args = {
+      "--column",
+      "--line-number",
+      "--no-heading",
+      "--color=never",
+      "--hidden",
+      "--max-columns=512",
+      "--smart-case",
+    }
+    do
+      if extra_args ~= nil then listlib.extend(args, extra_args) end
+      table.insert(args, "--")
+      table.insert(args, pattern)
+    end
+
+    subprocess.spawn("rg", { args = args, cwd = path }, output_callback(pattern, path), exit_callback("rg", args, path))
   end
 
-  subprocess.spawn("rg", { args = args, cwd = path }, callbacks.output(pattern, path), callbacks.exit("rg", args, path))
-end
+  function gitgrep(path, pattern, extra_args)
+    assert(pattern ~= nil)
+    if path == nil then return jelly.warn("path is nil, git grep canceled") end
 
-local function gitgrep(path, pattern, extra_args)
-  assert(pattern ~= nil)
-  if path == nil then return jelly.warn("path is nil, git grep canceled") end
+    local args = { "grep", "--line-number", "--column", "--no-color" }
+    do
+      if extra_args ~= nil then listlib.extend(args, extra_args) end
+      table.insert(args, "--")
+      table.insert(args, pattern)
+    end
 
-  local args = { "grep", "--line-number", "--column", "--no-color" }
-  do
-    if extra_args ~= nil then listlib.extend(args, extra_args) end
-    table.insert(args, "--")
-    table.insert(args, pattern)
+    subprocess.spawn("git", { args = args, cwd = path }, output_callback(pattern, path), exit_callback("gitgrep", args, path))
   end
-
-  subprocess.spawn("git", { args = args, cwd = path }, callbacks.output(pattern, path), callbacks.exit("gitgrep", args, path))
 end
 
-local function make_runner(runner)
+local PathDeterminers = {
+  repo = project.git_root,
+  cwd = project.working_root,
+  dot = function() return vim.fn.expand("%:p:h") end,
+}
+
+local API
+do
   -- it happens to be same to the output of rg and git grep
+  ---@class grep.Runner
+  ---@field source fun(path: string, pattern: string, extra_args?: string[])
+  local Prototype = {}
+  Prototype.__index = Prototype
 
-  local determiners = {
-    repo = project.git_root,
-    cwd = project.working_root,
-    dot = function() return vim.fn.expand("%:p:h") end,
-  }
+  function Prototype:input(path_determiner)
+    local determiner = assert(PathDeterminers[path_determiner], path_determiner)
+    local path = assert(determiner(), "no available path")
+    local regex = vim.fn.input("grep ")
+    if regex == "" then return end
+    self.source(path, regex)
+  end
+  function Prototype:vsel(path_determiner)
+    local determiner = assert(PathDeterminers[path_determiner], path_determiner)
+    local path = assert(determiner(), "no available path")
+    local fixed = vsel.oneline_text()
+    if fixed == nil then return end
+    self.source(path, fixed, { "--fixed-strings" })
+  end
+  function Prototype:text(path_determiner, regex)
+    local determiner = assert(PathDeterminers[path_determiner], path_determiner)
+    local path = assert(determiner(), "no available path")
+    self.source(path, regex)
+  end
 
-  return {
-    input = function(path_determiner)
-      local determiner = assert(determiners[path_determiner], "unknown path determiner")
-      local path = assert(determiner(), "no available path")
-      local regex = vim.fn.input("grep ")
-      if regex == "" then return end
-      runner(path, regex)
-    end,
-    vsel = function(path_determiner)
-      local determiner = assert(determiners[path_determiner], "unknown path determiner")
-      local path = assert(determiner(), "no available path")
-      local fixed = vsel.oneline_text()
-      if fixed == nil then return end
-      runner(path, fixed, { "--fixed-strings" })
-    end,
-    text = function(path_determiner, regex)
-      local determiner = assert(determiners[path_determiner], "unknown path determiner")
-      local path = assert(determiner(), "no available path")
-      runner(path, regex)
-    end,
-  }
+  function API(source) return setmetatable({ source = source }, Prototype) end
 end
 
-M.rg = make_runner(rg)
-M.git = make_runner(gitgrep)
+M.rg = API(rg)
+M.git = API(gitgrep)
+
+do
+  local function in_git() return project.git_root() ~= nil end
+  function M.vsel(path_determiner) return (in_git() and M.git or M.rg):vsel(path_determiner) end
+  function M.input(path_determiner) return (in_git() and M.git or M.rg):input(path_determiner) end
+end
 
 return M
