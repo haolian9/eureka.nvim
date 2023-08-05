@@ -9,25 +9,35 @@ local vsel = require("infra.vsel")
 
 local qltoggle = require("qltoggle")
 local sting = require("sting")
+local tui = require("tui")
 
 local Converter
 do
+  ---@class grep.Converter
+  ---@field realpath fun(path: string): string
+  local Prototype = {}
+
+  Prototype.__index = Prototype
+
   ---:h setqflist-what
   ---qflist and loclist shares the same structure
-  local function call(t, line)
+  function Prototype:__call(line)
     -- lno, col: 1-based
-    local file, lno, col, text = string.match(line, "(.+):(%d+):(%d+):(.*)")
-    assert(file and text, line)
+    local path, lno, col = string.match(line, "(.+):(%d+):(%d+):")
+    assert(path and lno and col, line)
+    local text_start = #path + #lno + #col + 1
     lno = tonumber(lno)
     col = tonumber(col)
     assert(lno and col)
+    ---only keep the first 256 chars of text
+    local text = string.sub(line, text_start, text_start + 256)
 
     ---why:
     ---* git grep and rg output relative path
     ---* nvim treats non-absolute path in qflist/loclist relative to cwd
-    local fname = t.resolve_fpath(file)
+    local abspath = self.realpath(path)
 
-    return { filename = fname, col = col, lnum = lno, text = text }
+    return { filename = abspath, col = col, lnum = lno, text = text }
   end
 
   ---@param root string
@@ -35,15 +45,15 @@ do
   function Converter(root)
     local cwd = project.working_root()
 
-    local resolve_fpath
+    local realpath
     if cwd == root then
-      resolve_fpath = function(relpath) return relpath end
+      realpath = function(path) return path end
     else
-      resolve_fpath = function(relpath) return fs.joinpath(root, relpath) end
+      realpath = function(path) return fs.joinpath(root, path) end
     end
 
     ---@diagnostic disable-next-line: return-type-mismatch
-    return setmetatable({ resolve_fpath = resolve_fpath }, { __call = call })
+    return setmetatable({ realpath = realpath }, Prototype)
   end
 end
 
@@ -72,7 +82,7 @@ do
 
   local function exit_callback(cmd, args, path)
     return function(exit_code)
-      -- rg, git grep shares same meaning on return code 0 and 1
+      -- rg and git grep share same meaning on return code 0 and 1
       -- 0: no error, has at least one match
       -- 1: no error, has none match
       if exit_code == 0 then return end
@@ -88,15 +98,7 @@ do
     assert(pattern ~= nil)
     if path == nil then return jelly.warn("path is nil, rg canceled") end
 
-    local args = {
-      "--column",
-      "--line-number",
-      "--no-heading",
-      "--color=never",
-      "--hidden",
-      "--max-columns=512",
-      "--smart-case",
-    }
+    local args = { "--column", "--line-number", "--no-heading", "--color=never", "--hidden", "--max-columns=512", "--smart-case" }
     do
       if extra_args ~= nil then listlib.extend(args, extra_args) end
       table.insert(args, "--")
@@ -110,8 +112,10 @@ do
     assert(pattern ~= nil)
     if path == nil then return jelly.warn("path is nil, git grep canceled") end
 
-    local args = { "grep", "--line-number", "--column", "--no-color" }
+    local args = { "grep", "-I", "--line-number", "--column", "--no-color" }
     do
+      ---smart-case
+      if string.match(pattern, "%u") == nil then table.insert(args, "--ignore-case") end
       if extra_args ~= nil then listlib.extend(args, extra_args) end
       table.insert(args, "--")
       table.insert(args, pattern)
@@ -121,39 +125,31 @@ do
   end
 end
 
-local PathDeterminers = {
-  repo = project.git_root,
-  cwd = project.working_root,
-  dot = function() return vim.fn.expand("%:p:h") end,
-}
-
 local API
 do
-  -- it happens to be same to the output of rg and git grep
-  ---@class grep.Runner
-  ---@field source fun(path: string, pattern: string, extra_args?: string[])
+  ---@class grep.API
+  ---@field private source fun(path: string, pattern: string, extra_args?: string[])
   local Prototype = {}
   Prototype.__index = Prototype
 
-  function Prototype:input(path_determiner)
-    local determiner = assert(PathDeterminers[path_determiner], path_determiner)
-    local path = assert(determiner(), "no available path")
-    local regex = vim.fn.input("grep ")
-    if regex == "" then return end
-    self.source(path, regex)
+  ---@param root string
+  function Prototype:input(root)
+    tui.input({ prompt = "grep", enter_insertmode = true }, function(regex)
+      if regex == nil or regex == "" then return end
+      self.source(root, regex)
+    end)
   end
-  function Prototype:vsel(path_determiner)
-    local determiner = assert(PathDeterminers[path_determiner], path_determiner)
-    local path = assert(determiner(), "no available path")
+
+  ---@param root string
+  function Prototype:vsel(root)
     local fixed = vsel.oneline_text()
     if fixed == nil then return end
-    self.source(path, fixed, { "--fixed-strings" })
+    self.source(root, fixed, { "--fixed-strings" })
   end
-  function Prototype:text(path_determiner, regex)
-    local determiner = assert(PathDeterminers[path_determiner], path_determiner)
-    local path = assert(determiner(), "no available path")
-    self.source(path, regex)
-  end
+
+  ---@param root string
+  ---@param regex string
+  function Prototype:text(root, regex) self.source(root, regex) end
 
   function API(source) return setmetatable({ source = source }, Prototype) end
 end
@@ -162,9 +158,19 @@ M.rg = API(rg)
 M.git = API(gitgrep)
 
 do
-  local function in_git() return project.git_root() ~= nil end
-  function M.vsel(path_determiner) return (in_git() and M.git or M.rg):vsel(path_determiner) end
-  function M.input(path_determiner) return (in_git() and M.git or M.rg):input(path_determiner) end
+  local function main(meth)
+    return function(...)
+      local git_root = project.git_root()
+      if git_root ~= nil then
+        M.git[meth](M.git, git_root)
+      else
+        M.rg[meth](M.rg, project.working_root(), ...)
+      end
+    end
+  end
+  M.vsel = main("vsel")
+  M.input = main("input")
+  M.text = main("text")
 end
 
 return M
