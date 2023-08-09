@@ -162,7 +162,7 @@ do
     return function(...)
       local git_root = project.git_root()
       if git_root ~= nil then
-        M.git[meth](M.git, git_root)
+        M.git[meth](M.git, git_root, ...)
       else
         M.rg[meth](M.rg, project.working_root(), ...)
       end
