@@ -134,7 +134,7 @@ do
 
   ---@param root string
   function Prototype:input(root)
-    tui.input({ prompt = "grep", enter_insertmode = true }, function(regex)
+    tui.input({ prompt = "grep", startinsert = true }, function(regex)
       if regex == nil or regex == "" then return end
       self.source(root, regex)
     end)
