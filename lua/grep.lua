@@ -7,7 +7,6 @@ local project = require("infra.project")
 local subprocess = require("infra.subprocess")
 local vsel = require("infra.vsel")
 
-local qltoggle = require("qltoggle")
 local sting = require("sting")
 local tui = require("tui")
 
@@ -72,11 +71,6 @@ do
         qf:append(converter(line))
       end
       qf:feed_vim()
-
-      ---showing quickfix window lastly, maybe this can reduce the copying
-      ---between quickfix buffer and internal datastructure while updating
-      ---quickfix items
-      qltoggle.open_qflist()
     end
   end
 
