@@ -102,6 +102,9 @@ do
     subprocess.spawn("rg", { args = args, cwd = path }, output_callback(pattern, path), exit_callback("rg", args, path))
   end
 
+  ---@param path string
+  ---@param pattern string
+  ---@param extra_args? string[]
   function gitgrep(path, pattern, extra_args)
     assert(pattern ~= nil)
     if path == nil then return jelly.warn("path is nil, git grep canceled") end
@@ -144,6 +147,11 @@ do
   ---@param root string
   ---@param regex string
   function Prototype:text(root, regex) self.source(root, regex) end
+
+  ---@param path string
+  ---@param pattern string
+  ---@param extra_args? string[]
+  function Prototype:__call(path, pattern, extra_args) self.source(path, pattern, extra_args) end
 
   function API(source) return setmetatable({ source = source }, Prototype) end
 end
