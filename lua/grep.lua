@@ -70,7 +70,7 @@ do
       for line in output_iter do
         qf:append(converter(line))
       end
-      qf:feed_vim()
+      qf:feed_vim(true, false)
     end
   end
 
