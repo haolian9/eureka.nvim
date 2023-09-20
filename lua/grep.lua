@@ -24,7 +24,7 @@ do
     -- lno, col: 1-based
     local path, lno, col = string.match(line, "(.+):(%d+):(%d+):")
     assert(path and lno and col, line)
-    local text_start = #path + #lno + #col + 1
+    local text_start = #path + #lno + #col + 3 + 1 -- 3=:::
     lno = tonumber(lno)
     col = tonumber(col)
     assert(lno and col)
