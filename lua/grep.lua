@@ -8,7 +8,7 @@ local subprocess = require("infra.subprocess")
 local vsel = require("infra.vsel")
 
 local sting = require("sting")
-local tui = require("tui")
+local puff = require("puff")
 
 local Converter
 do
@@ -131,7 +131,7 @@ do
 
   ---@param root string
   function Prototype:input(root)
-    tui.input({ prompt = "grep", startinsert = true }, function(regex)
+    puff.input({ prompt = "grep", startinsert = true }, function(regex)
       if regex == nil or regex == "" then return end
       self.source(root, regex)
     end)
