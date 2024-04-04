@@ -14,13 +14,13 @@ local Converter
 do
   ---@class grep.Converter
   ---@field realpath fun(path: string): string
-  local Prototype = {}
+  local Impl = {}
 
-  Prototype.__index = Prototype
+  Impl.__index = Impl
 
   ---:h setqflist-what
   ---qflist and loclist shares the same structure
-  function Prototype:__call(line)
+  function Impl:__call(line)
     -- lno, col: 1-based
     local path, lno, col = string.match(line, "(.+):(%d+):(%d+):")
     assert(path and lno and col, line)
@@ -52,7 +52,7 @@ do
     end
 
     ---@diagnostic disable-next-line: return-type-mismatch
-    return setmetatable({ realpath = realpath }, Prototype)
+    return setmetatable({ realpath = realpath }, Impl)
   end
 end
 
@@ -126,11 +126,11 @@ local API
 do
   ---@class grep.API
   ---@field private source fun(path: string, pattern: string, extra_args?: string[])
-  local Prototype = {}
-  Prototype.__index = Prototype
+  local Impl = {}
+  Impl.__index = Impl
 
   ---@param root string
-  function Prototype:input(root)
+  function Impl:input(root)
     puff.input({ prompt = "grep", startinsert = true }, function(regex)
       if regex == nil or regex == "" then return end
       self.source(root, regex)
@@ -138,7 +138,7 @@ do
   end
 
   ---@param root string
-  function Prototype:vsel(root)
+  function Impl:vsel(root)
     local fixed = vsel.oneline_text()
     if fixed == nil then return end
     self.source(root, fixed, { "--fixed-strings" })
@@ -146,14 +146,14 @@ do
 
   ---@param root string
   ---@param regex string
-  function Prototype:text(root, regex) self.source(root, regex) end
+  function Impl:text(root, regex) self.source(root, regex) end
 
   ---@param path string
   ---@param pattern string
   ---@param extra_args? string[]
-  function Prototype:__call(path, pattern, extra_args) self.source(path, pattern, extra_args) end
+  function Impl:__call(path, pattern, extra_args) self.source(path, pattern, extra_args) end
 
-  function API(source) return setmetatable({ source = source }, Prototype) end
+  function API(source) return setmetatable({ source = source }, Impl) end
 end
 
 M.rg = API(rg)
