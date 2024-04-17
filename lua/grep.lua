@@ -7,8 +7,8 @@ local project = require("infra.project")
 local subprocess = require("infra.subprocess")
 local vsel = require("infra.vsel")
 
-local sting = require("sting")
 local puff = require("puff")
+local sting = require("sting")
 
 local Converter
 do
@@ -56,6 +56,8 @@ do
   end
 end
 
+---@alias Source fun(path: string, pattern: string, extra_args?: string[])
+
 local rg, gitgrep
 do
   local function output_callback(pattern, root)
@@ -85,9 +87,7 @@ do
     end
   end
 
-  ---@param path string
-  ---@param pattern string
-  ---@param extra_args? string[]
+  ---@type Source
   function rg(path, pattern, extra_args)
     assert(pattern ~= nil)
     if path == nil then return jelly.warn("path is nil, rg canceled") end
@@ -102,9 +102,7 @@ do
     subprocess.spawn("rg", { args = args, cwd = path }, output_callback(pattern, path), exit_callback("rg", args, path))
   end
 
-  ---@param path string
-  ---@param pattern string
-  ---@param extra_args? string[]
+  ---@type Source
   function gitgrep(path, pattern, extra_args)
     assert(pattern ~= nil)
     if path == nil then return jelly.warn("path is nil, git grep canceled") end
@@ -170,8 +168,14 @@ do
       end
     end
   end
+
+  ---@type fun()
   M.vsel = main("vsel")
+
+  ---@type fun()
   M.input = main("input")
+
+  ---@type fun(regex: string)
   M.text = main("text")
 end
 
