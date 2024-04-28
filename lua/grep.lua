@@ -83,7 +83,7 @@ do
       -- 1: no error, has none match
       if exit_code == 0 then return end
       if exit_code == 1 then return end
-      vim.schedule(function() jelly.err("grep failed: %s args=%s, cwd=%s", cmd, table.concat(args), path) end)
+      jelly.err("grep failed: %s args=%s, cwd=%s", cmd, table.concat(args), path)
     end
   end
 
@@ -129,7 +129,7 @@ do
 
   ---@param root string
   function Impl:input(root)
-    puff.input({ prompt = "grep", startinsert = true }, function(regex)
+    puff.input({ prompt = "grep", startinsert = "i" }, function(regex)
       if regex == nil or regex == "" then return end
       self.source(root, regex)
     end)
