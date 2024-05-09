@@ -1,7 +1,7 @@
 local M = {}
 
 local fs = require("infra.fs")
-local jelly = require("infra.jellyfish")("grep")
+local jelly = require("infra.jellyfish")("grep", "info")
 local listlib = require("infra.listlib")
 local project = require("infra.project")
 local subprocess = require("infra.subprocess")
@@ -83,7 +83,7 @@ do
       -- 1: no error, has none match
       if exit_code == 0 then return end
       if exit_code == 1 then return end
-      jelly.err("grep failed: %s args=%s, cwd=%s", cmd, table.concat(args), path)
+      jelly.err("grep failed: %s args=%s, cwd=%s", cmd, args, path)
     end
   end
 
@@ -98,6 +98,8 @@ do
       table.insert(args, "--")
       table.insert(args, pattern)
     end
+
+    jelly.debug("rg: %s", args)
 
     subprocess.spawn("rg", { args = args, cwd = path }, output_callback(pattern, path), exit_callback("rg", args, path))
   end
@@ -116,6 +118,8 @@ do
       table.insert(args, pattern)
     end
 
+    jelly.debug("git: %s", args)
+
     subprocess.spawn("git", { args = args, cwd = path }, output_callback(pattern, path), exit_callback("gitgrep", args, path))
   end
 end
@@ -124,14 +128,16 @@ local API
 do
   ---@class grep.API
   ---@field private source fun(path: string, pattern: string, extra_args?: string[])
+  ---@field private last_input? string
   local Impl = {}
   Impl.__index = Impl
 
   ---@param root string
   function Impl:input(root)
-    puff.input({ prompt = "grep", startinsert = "i" }, function(regex)
-      if regex == nil or regex == "" then return end
-      self.source(root, regex)
+    puff.input({ prompt = "grep", startinsert = "a", default = self.last_input }, function(pattern)
+      if pattern == nil or pattern == "" then return end
+      self.last_input = pattern
+      self.source(root, pattern)
     end)
   end
 
@@ -143,8 +149,8 @@ do
   end
 
   ---@param root string
-  ---@param regex string
-  function Impl:text(root, regex) self.source(root, regex) end
+  ---@param pattern string
+  function Impl:text(root, pattern) self.source(root, pattern) end
 
   ---@param path string
   ---@param pattern string
@@ -169,13 +175,8 @@ do
     end
   end
 
-  ---@type fun()
   M.vsel = main("vsel")
-
-  ---@type fun()
   M.input = main("input")
-
-  ---@type fun(regex: string)
   M.text = main("text")
 end
 
