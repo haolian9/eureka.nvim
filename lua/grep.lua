@@ -128,15 +128,13 @@ local API
 do
   ---@class grep.API
   ---@field private source fun(path: string, pattern: string, extra_args?: string[])
-  ---@field private last_input? string
   local Impl = {}
   Impl.__index = Impl
 
   ---@param root string
   function Impl:input(root)
-    puff.input({ prompt = "grep", startinsert = "a", default = self.last_input }, function(pattern)
+    puff.input({ prompt = "grep", startinsert = "a", remember = "grep" }, function(pattern)
       if pattern == nil or pattern == "" then return end
-      self.last_input = pattern
       self.source(root, pattern)
     end)
   end
