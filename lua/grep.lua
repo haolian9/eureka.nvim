@@ -56,72 +56,84 @@ do
   end
 end
 
+local function StdoutCollector()
+  local chunks = {}
+  local stdout_closed = false
+  return {
+    ---@param data string?
+    on_stdout = function(data)
+      if data ~= nil then return table.insert(chunks, data) end
+      stdout_closed = true
+    end,
+    ---@param pattern string
+    ---@param root string
+    feed_vim = function(pattern, root)
+      assert(stdout_closed)
+
+      vim.schedule(function()
+        local converter = Converter(root)
+        local qf = sting.quickfix.shelf(string.format("grep:%s", pattern))
+
+        qf:reset()
+        for line in subprocess.iter_lines(chunks) do
+          qf:append(converter(line))
+        end
+        qf:feed_vim(true, false)
+      end)
+    end,
+  }
+end
+
 ---@alias Source fun(path: string, pattern: string, extra_args?: string[])
 
-local rg, gitgrep
-do
-  local function output_callback(pattern, root)
-    assert(pattern and root)
+---@type Source
+local function rg(path, pattern, extra_args)
+  assert(pattern ~= nil)
+  if path == nil then return jelly.warn("path is nil, rg canceled") end
 
-    local converter = Converter(root)
-    local qf = sting.quickfix.shelf(string.format("grep:%s", pattern))
-
-    ---@param output_iter fun(): string?
-    return function(output_iter)
-      qf:reset()
-      for line in output_iter do
-        qf:append(converter(line))
-      end
-      qf:feed_vim(true, false)
-    end
+  local args = { "--column", "--line-number", "--no-heading", "--color=never", "--hidden", "--max-columns=512", "--smart-case" }
+  do
+    if extra_args ~= nil then listlib.extend(args, extra_args) end
+    table.insert(args, "--")
+    table.insert(args, pattern)
   end
 
-  local function exit_callback(cmd, args, path)
-    return function(exit_code)
-      -- rg and git grep share same meaning on return code 0 and 1
-      -- 0: no error, has at least one match
-      -- 1: no error, has none match
-      if exit_code == 0 then return end
-      if exit_code == 1 then return end
-      jelly.err("grep failed: %s args=%s, cwd=%s", cmd, args, path)
-    end
+  jelly.debug("rg: %s", args)
+
+  local collector = StdoutCollector()
+
+  subprocess.spawn("rg", { args = args, cwd = path }, collector.on_stdout, function(exit_code)
+    -- 0: no error, has at least one match
+    -- 1: no error, has none match
+    if not (exit_code == 0 or exit_code == 1) then return jelly.err("grep failed: rg args=%s, cwd=%s", args, path) end
+    collector.feed_vim(pattern, path)
+  end)
+end
+
+---@type Source
+local function gitgrep(path, pattern, extra_args)
+  assert(pattern ~= nil)
+  if path == nil then return jelly.warn("path is nil, git grep canceled") end
+
+  local args = { "grep", "-I", "--line-number", "--column", "--no-color" }
+  do
+    ---smart-case
+    if string.match(pattern, "%u") == nil then table.insert(args, "--ignore-case") end
+    if extra_args ~= nil then listlib.extend(args, extra_args) end
+    table.insert(args, "--")
+    table.insert(args, pattern)
   end
 
-  ---@type Source
-  function rg(path, pattern, extra_args)
-    assert(pattern ~= nil)
-    if path == nil then return jelly.warn("path is nil, rg canceled") end
+  jelly.debug("git: %s", args)
 
-    local args = { "--column", "--line-number", "--no-heading", "--color=never", "--hidden", "--max-columns=512", "--smart-case" }
-    do
-      if extra_args ~= nil then listlib.extend(args, extra_args) end
-      table.insert(args, "--")
-      table.insert(args, pattern)
-    end
+  local collector = StdoutCollector()
 
-    jelly.debug("rg: %s", args)
-
-    subprocess.spawn("rg", { args = args, cwd = path }, output_callback(pattern, path), exit_callback("rg", args, path))
-  end
-
-  ---@type Source
-  function gitgrep(path, pattern, extra_args)
-    assert(pattern ~= nil)
-    if path == nil then return jelly.warn("path is nil, git grep canceled") end
-
-    local args = { "grep", "-I", "--line-number", "--column", "--no-color" }
-    do
-      ---smart-case
-      if string.match(pattern, "%u") == nil then table.insert(args, "--ignore-case") end
-      if extra_args ~= nil then listlib.extend(args, extra_args) end
-      table.insert(args, "--")
-      table.insert(args, pattern)
-    end
-
-    jelly.debug("git: %s", args)
-
-    subprocess.spawn("git", { args = args, cwd = path }, output_callback(pattern, path), exit_callback("gitgrep", args, path))
-  end
+  subprocess.spawn("git", { args = args, cwd = path }, collector.on_stdout, function(exit_code)
+    -- 0: no error, has at least one match
+    -- 1: no error, has none match
+    if not (exit_code == 0 or exit_code == 1) then return jelly.err("grep failed: git args=%s, cwd=%s", args, path) end
+    collector.feed_vim(pattern, path)
+  end)
 end
 
 local API
