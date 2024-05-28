@@ -145,7 +145,7 @@ do
 
   ---@param root string
   function Impl:input(root)
-    puff.input({ prompt = "grep", startinsert = "a", remember = "grep" }, function(pattern)
+    puff.input({ prompt = "grep", icon = "🔍", startinsert = "a", remember = "grep" }, function(pattern)
       if pattern == nil or pattern == "" then return end
       self.source(root, pattern)
     end)
