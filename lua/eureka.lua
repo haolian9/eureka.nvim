@@ -118,7 +118,7 @@ local function gitgrep(path, pattern, extra_args)
   local args = { "grep", "-I", "--line-number", "--column", "--no-color" }
   do
     ---smart-case
-    if string.match(pattern, "%u") == nil then table.insert(args, "--ignore-case") end
+    if string.find(pattern, "%u") == nil then table.insert(args, "--ignore-case") end
     if extra_args ~= nil then listlib.extend(args, extra_args) end
     table.insert(args, "--")
     table.insert(args, pattern)
